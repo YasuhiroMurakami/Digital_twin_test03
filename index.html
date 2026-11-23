@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>CesiumJS - River Facility Map</title>
+<style>
+html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="cesiumContainer"></div>
+
+<script>
+// URLの自動書き換え対策
+const protocol = "https:", domain = "cesium.com", folder = "downloads/cesiumjs/releases/1.120/Build/Cesium";
+const targetUrl = protocol + "//" + domain + "/" + folder + "/";
+
+// CSSとJSの読み込み
+const linkEl = document.createElement('link');
+linkEl.rel = 'stylesheet'; linkEl.href = targetUrl + 'Widgets/widgets.css';
+document.head.appendChild(linkEl);
+
+const scriptEl = document.createElement('script');
+scriptEl.src = targetUrl + 'Cesium.js';
+scriptEl.onload = () => { runMap(); };
+document.head.appendChild(scriptEl);
+
+function runMap() {
+    Cesium.Ion.defaultAccessToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IkFIZWRJWFk2XzRIUHNyWmIiLCJqdGkiOiJiZTQ2YjJkNy1hOTFmLTQyMWYtYmYzYy0zZmVhMmU4MTk0NjQiLCJpZCI6NDU4NzA2LCJzdWIiOiJ5YXN1aGlybyBtdXJha2FtaSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJUb3lvaGlyYV9SaXYgRGlnaXRhbCBUd2luMDMiLCJpYXQiOjE3OTQ4MTUyNzR9.Y8CPTluC20Ft0UFgScrMXKhP5GYyKxwTEN2dibVmcA0";
+
+    (async () => {
+        // 地図の初期化
+        const viewer = new Cesium.Viewer("cesiumContainer", { baseLayerPicker: true });
+        viewer.scene.globe.show = false; // Google 3D Tilesとの重複防止
+
+        // Google 3D Tilesの読み込み
+        try {
+            const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+            viewer.scene.primitives.add(tileset);
+        } catch (e) { console.error("3D Tilesエラー:", e); }
+
+// 1. 元のGeoJSONの読み込み（樋門・排水機場等）
+try {
+
+const dataSource =
+    await Cesium.GeoJsonDataSource.load(
+        'Himon_json4326.geojson',
+        {
+            markerSize: 0,
+            markerSymbol: '',
+            markerColor: Cesium.Color.TRANSPARENT
+        }
+    );
+
+    await viewer.dataSources.add(dataSource);
+
+    // 施設表示のカスタマイズ
+    dataSource.entities.values.forEach(entity => {
+
+        // 元ポイント削除
+        entity.point = undefined;
+
+        // 施設位置を示す赤丸
+        entity.point = new Cesium.PointGraphics({
+
+            pixelSize: 12,
+
+            color: Cesium.Color.RED,
+
+            outlineColor: Cesium.Color.WHITE,
+
+            outlineWidth: 3,
+
+            disableDepthTestDistance:
+                Number.POSITIVE_INFINITY
+
+        });
+
+        // 施設名ラベル
+        entity.label = new Cesium.LabelGraphics({
+
+            text:
+                entity.name || "",
+
+            font:
+                "18px sans-serif",
+
+            fillColor:
+                Cesium.Color.WHITE,
+
+            outlineColor:
+                Cesium.Color.BLACK,
+
+            outlineWidth:
+                4,
+
+            style:
+                Cesium.LabelStyle.FILL_AND_OUTLINE,
+
+            verticalOrigin:
+                Cesium.VerticalOrigin.BOTTOM,
+
+            pixelOffset:
+                new Cesium.Cartesian2(
+                    0,
+                    -30
+                ),
+
+            eyeOffset:
+                new Cesium.Cartesian3(
+                    0,
+                    0,
+                    -100
+                ),
+
+            disableDepthTestDistance:
+                Number.POSITIVE_INFINITY
+
+        });
+
+    });
+
+    await viewer.zoomTo(dataSource);
+
+}
+catch (e) {
+
+    console.error(
+        "Himonエラー:",
+        e
+    );
+
+}
+
+        // 2. ラインshp (KP_line_json.geojson) の読み込み
+        try {
+            const lineDataSource = await Cesium.GeoJsonDataSource.load('KP_line_json.geojson', {
+                stroke: Cesium.Color.YELLOW,
+                strokeWidth: 5
+            });
+            await viewer.dataSources.add(lineDataSource);
+            
+            // 地形に沿わせる設定
+lineDataSource.entities.values.forEach(entity => {
+
+    if (entity.polyline) {
+        entity.polyline.clampToGround = true;
+    }
+
+    const positions =
+        entity.polyline.positions.getValue(
+            Cesium.JulianDate.now()
+        );
+
+    if (positions && positions.length > 1) {
+
+        const midpoint =
+            Cesium.Cartesian3.midpoint(
+                positions[0],
+                positions[1],
+                new Cesium.Cartesian3()
+            );
+
+        viewer.entities.add({
+
+            position: midpoint,
+
+            label: {
+
+                text: String(entity.name),
+
+                font: '16px sans-serif',
+
+                fillColor: Cesium.Color.YELLOW,
+
+                outlineColor: Cesium.Color.BLACK,
+
+                outlineWidth: 3,
+
+                style:
+                    Cesium.LabelStyle.FILL_AND_OUTLINE,
+
+                disableDepthTestDistance:
+                    Number.POSITIVE_INFINITY,
+
+                pixelOffset:
+                    new Cesium.Cartesian2(0, -10)
+
+            }
+
+        });
+
+    }
+
+});
+        } catch (e) { console.error("ラインエラー:", e); }
+
+        // 3. ポイントshp (KP_point_json3.geojson) の読み込みと押しピン化
+        try {
+            const pointDataSource = await Cesium.GeoJsonDataSource.load('KP_point_json3.geojson');
+            await viewer.dataSources.add(pointDataSource);
+
+            pointDataSource.entities.values.forEach(entity => {
+                entity.point = undefined; // 点表示をオフ
+                
+                // 押しピン（Billboard）の設定
+                entity.billboard = {
+                    image: Cesium.buildModuleUrl('Assets/Textures/pin.png'),
+                    color: Cesium.Color.RED,
+                    verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND, // 地表に密着
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY       // 埋まり防止（最前面表示）
+                };
+
+                // ラベルの埋まり防止
+                if (entity.label) {
+                    entity.label.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
+                    entity.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+                }
+            });
+        } catch (e) { console.error("ポイントエラー:", e); }
+
+    })();
+}
+</script>
+</body>
+</html>
